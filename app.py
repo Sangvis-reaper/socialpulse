@@ -1,115 +1,118 @@
 import streamlit as st
-from streamlit_option_menu import option_menu
 import requests
-from urllib.parse import urlparse
+import pandas as pd
+import json
+import io
+import os
 
-# Google Custom Search API Configuration
-API_KEY = "AIzaSyDiA0IAG6bEejxAt4ca0or2cbJfWZIVQB0"  # Replace with your API key
-CSE_ID = "81126ca8728f54cc7"  # Replace with your CSE ID
+# Replace with your Neutrino API credentials
+USER_ID = "Tohka"
+API_KEY = "On2I9wPkS2aJYflMX99umTM0XfbTFL4LH3JoHpZVc0gxuV7n"
 
-def main():
-    with st.sidebar:
-        selected_option = option_menu(
-            menu_title="Social Media Platforms",
-            options=["Home", "Facebook", "Twitter", "Instagram", "TikTok", "LinkedIn", "YouTube"],
-            icons=["house", "facebook", "twitter", "instagram", "tiktok", "linkedin", "youtube"],
-            menu_icon="cast",
-            default_index=0,
-        )
+# API endpoint
+url = "https://neutrinoapi.net/phone-validate"
 
-    st.title("Social Media Search Application")
-    st.write("Search for content on specific social media platforms using Google's Custom Search API.")
+# Get absolute path of the CSV file
+script_dir = os.path.dirname(os.path.abspath(__file__))
+csv_file = os.path.join(script_dir, "countries", "countries.csv")
 
-    if selected_option == "KizunaFinder":
-        st.subheader("🔍 KizunaFinder OSINT Tool")
-        kizunafinder_main()  # Run KizunaFinder tool
-        return  # Stop further execution to prevent conflicts
+def phone_validation_app():
+    st.title("📱 Phone Number Validator")
 
-    # Search Input
-    query = st.text_input("Enter your search query:", "")
+# Tool description
+    st.write(
+        "This tool allows you to validate phone numbers by checking their validity, "
+        "carrier information, and location details. Enter a phone number below to verify."
+    )
 
-    if query:
-        st.write(f"Showing results for: **{query}**")
+    # User input fields
+    number = st.text_input("Enter the phone number:(e.g., +60123456789)")
 
-        platform_sites = {
-            "Facebook": "facebook.com",
-            "Twitter": "twitter.com",
-            "Instagram": "instagram.com",
-            "TikTok": "tiktok.com",
-            "LinkedIn": "linkedin.com",
-            "YouTube": "youtube.com",
-        }
+    # Button to trigger validation
+    if st.button("✅ Validate Phone Number"):
+        if number:
+            params = {"number": number}
+            headers = {"User-ID": USER_ID, "API-Key": API_KEY}
 
-        # Select Site for Platform-Specific Queries
-        if selected_option == "Home":
-            st.subheader("Search All Platforms")
-            results = search_google_cse(query)
-        else:
-            st.subheader(f"{selected_option} Results")
-            results = search_google_cse(query, site=platform_sites.get(selected_option, None))
+            # Make the POST request
+            response = requests.post(url, headers=headers, data=params)
 
-        # Display Results
-        if results:
-            for result in results:
-                st.write(f"**{result['title']}**")
-                st.write(f"[{result['link']}]({result['link']})")
-                st.write(result["snippet"])
-                if result["image"] and is_valid_url(result["image"]):
-                    st.image(result["image"], width=400)
+            if response.status_code == 200:
+                data = response.json()
+
+                # Rearrange the results
+                rearranged_data = {
+                    "✔️ Valid": data.get("valid"),
+                    "📞 Type": data.get("type"),
+                    "🌍 Country": data.get("country"),
+                    "📍 Location": data.get("location"),
+                    "🔢 International Number": data.get("international-number"),
+                    "🔢 Local Number": data.get("local-number"),
+                    "🇨🇺 Country Code": data.get("country-code"),
+                    "💱 Currency Code": data.get("currency-code"),
+                    "📡 International Calling Code": data.get("international-calling-code"),
+                    "📱 Is Mobile": data.get("is-mobile"),
+                    "📶 Carrier Service Provider": data.get("prefix-network")
+                }
+
+                # Display rearranged data in a box
+                st.subheader("Phone Validation Results:")
+                st.markdown(
+                    """<div style="border: 2px solid #ddd; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    """ + "<br>".join([f"<b>{key}:</b> {value}" for key, value in rearranged_data.items()]) + "</div>",
+                    unsafe_allow_html=True
+                )
+
+                # Check additional country details from CSV
+                if os.path.exists(csv_file):
+                    try:
+                        country_data = pd.read_csv(csv_file, delimiter=";")
+                        country_info = country_data[country_data['Country Name'] == data.get("country")]
+
+                        if not country_info.empty:
+                            st.subheader("Additional Country Details (CSV):")
+                            st.markdown(
+                                """<div style="border: 2px solid #ddd; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                                """ + "<br>".join([f"<b>{col}:</b> {country_info.iloc[0][col]}" for col in country_info.columns]) + "</div>",
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            st.info("No additional details found for this country in the CSV file.")
+                    except Exception as e:
+                        st.error(f"Error reading CSV file: {e}")
                 else:
-                    st.write("_No image available._")
-                st.write("---")
-        else:
-            st.write("No results found.")
+                    st.error("Country details CSV file not found.")
 
-# Footer with Copyright
+                # Convert results to CSV format
+                df = pd.DataFrame([rearranged_data])
+                csv_buffer = io.StringIO()
+                df.to_csv(csv_buffer, index=False, sep=';')
+                csv_data = csv_buffer.getvalue()
+
+                # Download button for CSV
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.download_button(
+                    label="📥 Download Results as CSV",
+                    data=csv_data,
+                    file_name="phone_validation_results.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.error(f"Error {response.status_code}: {response.text}")
+        else:
+            st.warning("Please enter a valid phone number.")
+
+# Define the main function for integration
+def main():
+    phone_validation_app()
+
+ # Footer with Copyright
     st.markdown("""
     ---
-    © 2025, All rights reserved. 
+    © 2025, All rights reserved.
     Developed by ECLOGIC.
     """)
 
-def search_google_cse(query, site=None):
-    """
-    Perform a Google Custom Search API query.
-    Args:
-        query (str): Search term.
-        site (str): Specific site to search (e.g., tiktok.com).
-    Returns:
-        list: A list of search results (title, link, snippet, image).
-    """
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        "q": f"{query} site:{site}" if site else query,
-        "key": API_KEY,
-        "cx": CSE_ID,
-    }
-    response = requests.get(url, params=params)
-    data = response.json()
-    results = []
-    if "items" in data:
-        for item in data["items"]:
-            results.append({
-                "title": item["title"],
-                "link": item["link"],
-                "snippet": item.get("snippet", ""),
-                "image": item.get("pagemap", {}).get("cse_image", [{}])[0].get("src"),
-            })
-    return results
-
-def is_valid_url(url):
-    """
-    Check if a URL is valid.
-    Args:
-        url (str): The URL to validate.
-    Returns:
-        bool: True if valid, False otherwise.
-    """
-    try:
-        parsed = urlparse(url)
-        return bool(parsed.netloc) and bool(parsed.scheme)
-    except Exception:
-        return False
 
 if __name__ == "__main__":
     main()
